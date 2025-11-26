@@ -10,10 +10,8 @@ from sklearn.cluster import KMeans
 from collections import Counter
 import os
 
-# Uncomment if you want to force CPU
-# os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-# Device configuration
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
@@ -36,7 +34,6 @@ def extract_label(label):
 # Step 3: Apply function to clean failureType column
 data['failureType'] = data['failureType'].apply(extract_label)
 
-# Keep all data (labeled and unlabeled)
 
 # Preprocess wafer maps to fixed size
 resized_size = 64
@@ -51,29 +48,28 @@ def preprocess_wafer_map(wm):
     pad_right = max_dim - w - pad_left
     padded = np.pad(wm, ((pad_top, pad_bottom), (pad_left, pad_right)), mode='constant', constant_values=0)
     zoom_factors = (resized_size / max_dim, resized_size / max_dim)
-    resized = zoom(padded, zoom_factors, order=0)  # Nearest neighbor for discrete values
-    return resized.astype(np.float32) / 2.0  # Normalize to [0, 1]
+    resized = zoom(padded, zoom_factors, order=0)  
+    return resized.astype(np.float32) / 2.0 
 
-# Apply preprocessing
+#preprocessing
 print("Preprocessing wafer maps...")
 wafer_maps = []
 for i in range(len(data)):
     wm = preprocess_wafer_map(data['waferMap'][i])
     wafer_maps.append(wm)
-wafer_maps = np.array(wafer_maps)  # (N, 64, 64)
+wafer_maps = np.array(wafer_maps) 
 print("Wafer maps shape:", wafer_maps.shape)
 
-# Add channel dimension for CNN (N, 1, 64, 64)
 wafer_maps = wafer_maps[:, np.newaxis, :, :]
 
-# Convert to torch tensor
+
 tensors = torch.from_numpy(wafer_maps)
 
-# Create dataset and dataloader for autoencoder training
-dataset = TensorDataset(tensors, tensors)  # Input = target for reconstruction
+# dataset and dataloader for autoencoder training
+dataset = TensorDataset(tensors, tensors)  
 dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
 
-# Define Convolutional Autoencoder
+# Convolutional Autoencoder
 class ConvAutoencoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -86,7 +82,7 @@ class ConvAutoencoder(nn.Module):
             nn.Conv2d(64, 128, 3, stride=2, padding=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(128 * 8 * 8, 128)  # Embedding dimension: 128
+            nn.Linear(128 * 8 * 8, 128)  
         )
         # Decoder
         self.decoder = nn.Sequential(
@@ -98,7 +94,7 @@ class ConvAutoencoder(nn.Module):
             nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
             nn.ConvTranspose2d(32, 1, 3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()  # Output in [0,1]
+            nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -114,8 +110,7 @@ model = ConvAutoencoder().to(device)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.MSELoss()
 
-# Train the autoencoder
-epochs = 10  # Adjust as needed (more epochs for better features)
+epochs = 10 
 print("Training autoencoder...")
 for epoch in range(epochs):
     model.train()
@@ -130,7 +125,7 @@ for epoch in range(epochs):
         loss_total += loss.item()
     print(f"Epoch {epoch+1}/{epochs}, Loss: {loss_total / len(dataloader):.4f}")
 
-# Extract embeddings in batches to save memory
+# Extract embeddings
 print("Extracting embeddings...")
 embeddings = []
 with torch.no_grad():
@@ -143,7 +138,7 @@ embeddings = np.vstack(embeddings)
 print("Embeddings shape:", embeddings.shape)
 
 # Perform clustering with KMeans
-k = 8  # Number of known failure types
+k = 8 
 print(f"Performing KMeans clustering with k={k}...")
 kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
 cluster_labels = kmeans.fit_predict(embeddings)
@@ -179,11 +174,11 @@ assigned_labels = [cluster_to_label[cl] for cl in cluster_labels]
 # Add to dataframe
 data['predicted_failureType'] = assigned_labels
 
-# For labeled data, overwrite predicted with true if you want, but here we keep for comparison
 # Evaluate clustering accuracy on labeled data (using optimal assignment)
 acc = np.sum(conf[row_ind, col_ind]) / len(int_true)
 print(f"Clustering accuracy on labeled data: {acc:.4f}")
 
 # Save the updated dataset
 data.to_pickle("labeled_LSWMD.pkl")
+
 print("Done! Updated dataset saved to 'labeled_LSWMD.pkl'. Unlabeled instances are labeled in 'predicted_failureType' column.")
